@@ -1,0 +1,1068 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>자전거 프레임 AI 자동 정렬 비교기</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <script>
+        tailwind = tailwind || {};
+        tailwind.config = { darkMode: 'class' };
+    </script>
+    <!-- Tailwind CSS for Modern UI -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- OpenCV.js for Computer Vision (Wheel Detection) -->
+    <script async src="https://docs.opencv.org/4.5.4/opencv.js" type="text/javascript" id="opencv-js"></script>
+    <!-- GIF export for animation download -->
+    <script src="https://cdn.jsdelivr.net/npm/gif.js.optimized/dist/gif.js"></script>
+    <style>
+        :root {
+            color-scheme: light;
+            --page-bg: #f8fafc;
+            --surface: #ffffff;
+            --surface-muted: #f8fafc;
+            --surface-strong: #020617;
+            --text: #0f172a;
+            --text-muted: #475569;
+            --text-soft: #64748b;
+            --border: #e2e8f0;
+            --viewer-bg: #020617;
+        }
+        html.dark {
+            color-scheme: dark;
+            --page-bg: #020617;
+            --surface: #0f172a;
+            --surface-muted: #111827;
+            --surface-strong: #020617;
+            --text: #f8fafc;
+            --text-muted: #cbd5e1;
+            --text-soft: #94a3b8;
+            --border: #334155;
+            --viewer-bg: #020617;
+        }
+        body {
+            background-color: var(--page-bg);
+            color: var(--text);
+            transition: background-color 0.2s ease, color 0.2s ease;
+        }
+        body.dark .bg-white { background-color: var(--surface) !important; }
+        body.dark .bg-slate-50 { background-color: var(--surface-muted) !important; }
+        body.dark .bg-blue-50 { background-color: rgba(30, 58, 138, 0.25) !important; border-color: rgba(96, 165, 250, 0.25) !important; }
+        body.dark .bg-slate-900 { background-color: var(--viewer-bg) !important; }
+        body.dark .bg-slate-950 { background-color: var(--surface-strong) !important; }
+        body.dark .text-slate-900 { color: var(--text) !important; }
+        body.dark .text-slate-800, body.dark .text-slate-700, body.dark .text-slate-600, body.dark .text-slate-500, body.dark .text-slate-400 { color: var(--text-muted) !important; }
+        body.dark .text-slate-400 { color: var(--text-soft) !important; }
+        body.dark .border-slate-200, body.dark .border-slate-300, body.dark .border-slate-100 { border-color: var(--border) !important; }
+        body.dark .border-blue-200\/60 { border-color: rgba(96, 165, 250, 0.25) !important; }
+        body.dark .shadow-sm, body.dark .shadow-md, body.dark .shadow-lg { box-shadow: none !important; }
+        /* OpenCV 로딩 스피너 애니메이션 */
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        /* 드래그 앤 드롭 하이라이트 */
+        .drag-over {
+            border-color: #3b82f6;
+            background-color: #eff6ff;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen pb-12">
+
+    <!-- Header -->
+    <header class="bg-white border-b border-slate-200 py-4 px-6 sticky top-0 z-50 shadow-sm">
+        <div class="max-w-6xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-4">
+            <div class="flex items-center gap-3">
+                <div class="p-2 bg-blue-600 text-white rounded-lg">
+                    <i data-lucide="bike" class="w-6 h-6"></i>
+                </div>
+                <div>
+                    <h1 class="text-xl font-bold text-slate-900 flex items-center gap-2">
+                        자전거 프레임 AI 자동 비교기
+                        <span class="text-xs font-normal bg-blue-100 text-blue-800 px-2.5 py-0.5 rounded-full">최대 10장</span>
+                    </h1>
+                    <p class="text-xs text-slate-500">바퀴 위치를 AI가 감지하여 프레임 변화만 겹쳐 보여줍니다.</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-2">
+                <button id="themeToggle" class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition">
+                    <i id="themeIcon" data-lucide="moon" class="w-4 h-4"></i>
+                    <span>다크 모드</span>
+                </button>
+                <!-- OpenCV.js 로드 상태 표시 -->
+                <div id="cvStatus" class="flex items-center gap-2 text-sm bg-amber-50 text-amber-700 px-3 py-1.5 rounded-lg border border-amber-200">
+                    <div class="loader"></div>
+                    <span class="font-medium">AI 정렬 엔진(OpenCV) 초기화 중...</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-6xl mx-auto px-4 mt-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+        
+        <!-- 왼쪽: 업로드 및 이미지 리스트 제어 (5글자 너비) -->
+        <section class="lg:col-span-5 flex flex-col gap-6">
+            
+            <!-- 파일 드롭존 -->
+            <div id="dropzone" class="border-2 border-dashed border-slate-300 rounded-xl p-6 bg-white text-center cursor-pointer hover:border-blue-500 hover:bg-blue-50/50 transition-all">
+                <input type="file" id="fileInput" accept="image/*" multiple class="hidden">
+                <div class="flex flex-col items-center justify-center gap-3">
+                    <div class="w-12 h-12 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center">
+                        <i data-lucide="upload-cloud" class="w-6 h-6"></i>
+                    </div>
+                    <div>
+                        <p class="font-semibold text-slate-700">자전거 사진들을 업로드하세요</p>
+                        <p class="text-xs text-slate-400 mt-1">드래그 앤 드롭 또는 클릭하여 업로드 (최대 10장)</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 사진 목록 리스트 -->
+            <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                <div class="flex justify-between items-center mb-3">
+                    <h2 class="font-bold text-slate-800 flex items-center gap-1.5">
+                        <i data-lucide="layers" class="w-4 h-4 text-slate-500"></i>
+                        업로드된 자전거 목록 (<span id="photoCount">0</span>/10)
+                    </h2>
+                    <button id="clearAllBtn" class="text-xs text-red-500 hover:text-red-700 font-semibold hidden">전체 삭제</button>
+                </div>
+
+                <div id="photoList" class="flex flex-col gap-2 max-h-[350px] overflow-y-auto pr-1">
+                    <!-- 업로드 유도 템플릿 -->
+                    <div id="noPhotosMsg" class="text-center py-8 text-slate-400 text-sm">
+                        <p>등록된 사진이 없습니다.</p>
+                        <p class="text-xs text-slate-300">첫 번째 사진이 기준(배경) 자전거가 됩니다.</p>
+                    </div>
+                </div>
+
+                <div class="mt-4 pt-3 border-t border-slate-100 flex gap-2">
+                    <button id="aiAlignBtn" class="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold py-2.5 px-4 rounded-lg shadow-md shadow-blue-200 hover:opacity-95 transition flex items-center justify-center gap-2 text-sm disabled:opacity-50 disabled:shadow-none" disabled>
+                        <i data-lucide="sparkles" class="w-4 h-4"></i>
+                        AI 자동 바퀴 정렬 실행
+                    </button>
+                </div>
+            </div>
+
+            <!-- 수동 미세 정렬 패널 -->
+            <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                <h3 class="font-bold text-slate-800 flex items-center gap-1.5 mb-3">
+                    <i data-lucide="sliders" class="w-4 h-4 text-slate-500"></i>
+                    선택된 이미지 수동 미세 조정
+                </h3>
+                <div id="manualAdjustmentPanel" class="flex flex-col gap-3 opacity-50 pointer-events-none">
+                    <p class="text-xs text-slate-500 font-medium bg-slate-50 p-2 rounded border border-slate-100">
+                        리스트에서 노란색 테두리의 수동 조정 대상을 선택하여 정밀 조정이 가능합니다.
+                    </p>
+                    
+                    <div class="flex flex-col gap-1">
+                        <div class="flex justify-between text-xs font-semibold text-slate-600">
+                            <span>크기 비율 (Scale)</span>
+                            <span id="scaleVal">1.00</span>
+                        </div>
+                        <input type="range" id="manualScale" min="0.3" max="3" step="0.005" value="1" class="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600">
+                    </div>
+
+                    <div class="flex flex-col gap-1">
+                        <div class="flex justify-between text-xs font-semibold text-slate-600">
+                            <span>수평 이동 (X)</span>
+                            <span id="xVal">0px</span>
+                        </div>
+                        <input type="range" id="manualX" min="-300" max="300" step="1" value="0" class="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600">
+                    </div>
+
+                    <div class="flex flex-col gap-1">
+                        <div class="flex justify-between text-xs font-semibold text-slate-600">
+                            <span>수직 이동 (Y)</span>
+                            <span id="yVal">0px</span>
+                        </div>
+                        <input type="range" id="manualY" min="-300" max="300" step="1" value="0" class="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600">
+                    </div>
+
+                    <div class="flex flex-col gap-1">
+                        <div class="flex justify-between text-xs font-semibold text-slate-600">
+                            <span>회전 (Rotation)</span>
+                            <span id="rotateVal">0°</span>
+                        </div>
+                        <input type="range" id="manualRotate" min="-30" max="30" step="0.1" value="0" class="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600">
+                    </div>
+                </div>
+            </div>
+
+        </section>
+
+        <!-- 오른쪽: 뷰어 및 애니메이션 컨트롤 (7글자 너비) -->
+        <section class="lg:col-span-7 flex flex-col gap-4">
+            
+            <!-- 메인 뷰어 박스 -->
+            <div class="bg-slate-900 rounded-2xl p-2 shadow-lg relative overflow-hidden flex flex-col">
+                <!-- 뷰어 상단 상태 헤더 -->
+                <div class="flex justify-between items-center px-4 py-2 bg-slate-850 text-xs text-slate-400">
+                    <span id="currentFrameBadge" class="bg-blue-900/50 border border-blue-700/50 text-blue-400 px-2.5 py-1 rounded-full font-bold">
+                        대기 중
+                    </span>
+                    <div class="flex items-center gap-2">
+                        <label class="flex items-center gap-1.5 cursor-pointer">
+                            <input type="checkbox" id="showCirclesToggle" class="rounded border-slate-700 bg-slate-800 text-blue-600 focus:ring-blue-500">
+                            <span>감지된 원 표시</span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- 캔버스/이미지 화면 컨테이너 -->
+                <div id="viewerViewport" class="relative w-full aspect-[4/3] bg-slate-950 rounded-xl overflow-hidden flex items-center justify-center">
+                    
+                    <!-- 이미지들이 레이어링되는 위치 -->
+                    <div id="imageStage" class="relative w-full h-full"></div>
+                    
+                    <!-- 검출된 바퀴 가이드라인 오버레이 (캔버스) -->
+                    <canvas id="guideCanvas" class="absolute inset-0 w-full h-full pointer-events-none z-30" style="mix-blend-mode: screen;"></canvas>
+
+                    <!-- 정렬 진행상황 안내 레이어 -->
+                    <div id="loadingOverlay" class="absolute inset-0 bg-slate-900/80 z-40 flex flex-col items-center justify-center text-white hidden">
+                        <div class="loader mb-4"></div>
+                        <p id="loadingMsg" class="font-semibold">AI 정렬 작업 중...</p>
+                        <p class="text-xs text-slate-400 mt-1">자전거 사진의 바퀴를 감지하고 있습니다.</p>
+                    </div>
+
+                    <!-- 대기 상태 유도 멘트 -->
+                    <div id="emptyStageMsg" class="absolute inset-0 flex flex-col items-center justify-center text-center p-6 text-slate-500 z-10 pointer-events-none">
+                        <i data-lucide="image" class="w-12 h-12 mb-3 text-slate-700"></i>
+                        <p class="font-medium text-slate-400">오른쪽 [파일 드롭존]에 자전거 사진을 올려주세요.</p>
+                        <p class="text-xs text-slate-600 mt-1">다양한 각도의 사진보다는 바퀴 중심이 맞는 사진이 좋습니다.</p>
+                    </div>
+                </div>
+
+                <!-- 플레이어 컨트롤러 하단 -->
+                <div class="bg-slate-900/90 p-4 border-t border-slate-800 rounded-b-2xl">
+                    <div class="flex flex-col sm:flex-row items-center justify-between gap-4">
+                        <!-- 재생 조작 버튼들 -->
+                        <div class="flex items-center gap-2 w-full sm:w-auto justify-center flex-wrap">
+                            <button id="playBtn" class="bg-emerald-600 text-white font-bold py-2 px-6 rounded-lg hover:bg-emerald-500 transition flex items-center gap-2 shadow-md shadow-emerald-900/30 disabled:opacity-50" disabled>
+                                <i data-lucide="play" class="w-4 h-4 fill-current"></i>
+                                애니메이션 재생
+                            </button>
+                            <button id="stepBtn" class="bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 p-2.5 rounded-lg transition disabled:opacity-50" title="다음 프레임" disabled>
+                                <i data-lucide="skip-forward" class="w-4 h-4"></i>
+                            </button>
+                            <button id="downloadAnimBtn" class="bg-violet-600 hover:bg-violet-500 text-white font-bold py-2 px-4 rounded-lg transition flex items-center gap-2 shadow-md shadow-violet-950/30 disabled:opacity-50" disabled>
+                                <i data-lucide="download" class="w-4 h-4"></i>
+                                애니메이션 다운로드
+                            </button>
+                        </div>
+
+                        <!-- 개별 깜빡임 속도 제어 -->
+                        <div class="flex items-center gap-3 w-full sm:w-auto">
+                            <span class="text-xs font-semibold text-slate-400 whitespace-nowrap">프레임 대기 시간 (초)</span>
+                            <input type="range" id="animSpeed" min="0.05" max="1.5" step="0.05" value="0.3" class="w-32 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-500">
+                            <span id="speedValText" class="text-xs font-mono font-semibold text-slate-300 w-10">0.30s</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 활용 팁 설명 영역 -->
+            <div class="bg-blue-50 border border-blue-200/60 rounded-xl p-4 text-xs text-blue-800 leading-relaxed">
+                <h4 class="font-bold flex items-center gap-1 mb-1.5">
+                    <i data-lucide="info" class="w-3.5 h-3.5"></i>
+                    AI 자전거 원 자동 정렬 가이드
+                </h4>
+                <p class="mb-1"><strong>1. 원리:</strong> 이미지 분석 기술을 사용해 각 자전거 사진의 가장 뚜렷한 원형 2개(앞바퀴와 뒷바퀴)를 찾습니다.</p>
+                <p class="mb-1"><strong>2. 기준:</strong> 리스트 최상단(1번) 자전거 사진을 기준배경으로 사용하며, 2번 자전거부터 바퀴 중심의 거리를 1번 바퀴의 크기와 각도에 맞춰 자동으로 축소/확대 및 회전시킵니다.</p>
+                <p><strong>3. 팁:</strong> AI가 바퀴를 잘 잡지 못할 경우, 수동 미세 조정 패널의 슬라이더를 이용해서 각 레이어의 투명도/크기/회전을 수동 정렬해보세요.</p>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        // 글로벌 상태 관리 객체
+        const state = {
+            images: [], // { id, name, fileUrl, imgElement, scale, x, y, rotate, opacity, detectedCircles: [] }
+            activeImgId: null, // 수동 정밀 조정을 위해 선택된 이미지 ID
+            isAnimating: false,
+            animationTimer: null,
+            currentFrameIdx: 0,
+            opencvLoaded: false
+        };
+
+        // DOM 원소
+        const fileInput = document.getElementById('fileInput');
+        const dropzone = document.getElementById('dropzone');
+        const themeToggle = document.getElementById('themeToggle');
+        const themeIcon = document.getElementById('themeIcon');
+        const photoList = document.getElementById('photoList');
+        const noPhotosMsg = document.getElementById('noPhotosMsg');
+        const photoCount = document.getElementById('photoCount');
+        const clearAllBtn = document.getElementById('clearAllBtn');
+        const aiAlignBtn = document.getElementById('aiAlignBtn');
+        
+        const viewerViewport = document.getElementById('viewerViewport');
+        const imageStage = document.getElementById('imageStage');
+        const guideCanvas = document.getElementById('guideCanvas');
+        const emptyStageMsg = document.getElementById('emptyStageMsg');
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        const loadingMsg = document.getElementById('loadingMsg');
+        const currentFrameBadge = document.getElementById('currentFrameBadge');
+        const showCirclesToggle = document.getElementById('showCirclesToggle');
+
+        const playBtn = document.getElementById('playBtn');
+        const stepBtn = document.getElementById('stepBtn');
+        const downloadAnimBtn = document.getElementById('downloadAnimBtn');
+        const animSpeed = document.getElementById('animSpeed');
+        const speedValText = document.getElementById('speedValText');
+
+        // 수동 패널 엘리먼트
+        const manualPanel = document.getElementById('manualAdjustmentPanel');
+        const manualScale = document.getElementById('manualScale');
+        const manualX = document.getElementById('manualX');
+        const manualY = document.getElementById('manualY');
+        const manualRotate = document.getElementById('manualRotate');
+        const scaleVal = document.getElementById('scaleVal');
+        const xVal = document.getElementById('xVal');
+        const yVal = document.getElementById('yVal');
+        const rotateVal = document.getElementById('rotateVal');
+
+        function applyTheme(theme) {
+            const isDark = theme === 'dark';
+            document.documentElement.classList.toggle('dark', isDark);
+            document.body.classList.toggle('dark', isDark);
+            document.documentElement.setAttribute('data-theme', theme);
+            localStorage.setItem('cycle-theme', theme);
+            if (themeToggle && themeIcon) {
+                themeIcon.setAttribute('data-lucide', isDark ? 'sun' : 'moon');
+                themeToggle.querySelector('span').textContent = isDark ? '라이트 모드' : '다크 모드';
+                lucide.createIcons();
+            }
+        }
+
+        function initTheme() {
+            const savedTheme = localStorage.getItem('cycle-theme');
+            const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+            applyTheme(savedTheme || systemTheme);
+        }
+
+        themeToggle.addEventListener('click', () => {
+            const nextTheme = document.documentElement.classList.contains('dark') ? 'light' : 'dark';
+            applyTheme(nextTheme);
+        });
+
+        initTheme();
+
+        // OpenCV 모듈 로드 완료 콜백 대기
+        function onOpenCvReady() {
+            state.opencvLoaded = true;
+            const cvStatus = document.getElementById('cvStatus');
+            cvStatus.innerHTML = `<i data-lucide="check-circle" class="w-4 h-4 text-emerald-500"></i><span class="text-emerald-700 font-medium">AI 정렬 엔진 준비 완료</span>`;
+            cvStatus.className = "flex items-center gap-2 text-sm bg-emerald-50 text-emerald-700 px-3 py-1.5 rounded-lg border border-emerald-200";
+            lucide.createIcons();
+            checkReadyState();
+        }
+
+        // OpenCV.js 스크립트 연결 확인 및 로드 완료 이벤트 바인딩
+        const cvScript = document.getElementById('opencv-js');
+        if (cvScript) {
+            cvScript.addEventListener('load', () => {
+                // cv는 비동기식 로드이므로 모듈 확인
+                if (typeof cv !== 'undefined' && cv.getBuildInformation) {
+                    onOpenCvReady();
+                } else {
+                    cv['onRuntimeInitialized'] = () => {
+                        onOpenCvReady();
+                    }
+                }
+            });
+        }
+
+        // 드래그 앤 드롭 파일 로직
+        dropzone.addEventListener('click', () => fileInput.click());
+        dropzone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropzone.classList.add('drag-over');
+        });
+        dropzone.addEventListener('dragleave', () => {
+            dropzone.classList.remove('drag-over');
+        });
+        dropzone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropzone.classList.remove('drag-over');
+            handleFiles(e.dataTransfer.files);
+        });
+        fileInput.addEventListener('change', (e) => {
+            handleFiles(e.target.files);
+        });
+
+        // 파일 유효성 검사 및 정렬 이미지 추가
+        function handleFiles(files) {
+            if (state.images.length >= 10) {
+                alert("최대 10개의 자전거 이미지만 업로드 가능합니다.");
+                return;
+            }
+
+            const currentLength = state.images.length;
+            const limit = Math.min(files.length, 10 - currentLength);
+
+            let promises = [];
+            for (let i = 0; i < limit; i++) {
+                const file = files[i];
+                if (!file.type.startsWith('image/')) continue;
+
+                const promise = new Promise((resolve) => {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        const img = new Image();
+                        img.src = e.target.result;
+                        img.onload = () => {
+                            const newImg = {
+                                id: 'bike_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+                                name: file.name,
+                                fileUrl: e.target.result,
+                                imgElement: img,
+                                scale: 1.0,
+                                x: 0,
+                                y: 0,
+                                rotate: 0,
+                                opacity: state.images.length === 0 ? 1.0 : 0.0, // 첫 이미지만 투명도 100%
+                                detectedCircles: []
+                            };
+                            state.images.push(newImg);
+                            resolve();
+                        };
+                    };
+                    reader.readAsDataURL(file);
+                });
+                promises.push(promise);
+            }
+
+            Promise.all(promises).then(() => {
+                updateUI();
+                renderStage();
+                checkReadyState();
+            });
+        }
+
+        // UI 갱신 함수
+        function updateUI() {
+            lucide.createIcons();
+            photoCount.textContent = state.images.length;
+
+            if (state.images.length > 0) {
+                noPhotosMsg.classList.add('hidden');
+                clearAllBtn.classList.remove('hidden');
+                emptyStageMsg.classList.add('hidden');
+            } else {
+                noPhotosMsg.classList.remove('hidden');
+                clearAllBtn.classList.add('hidden');
+                emptyStageMsg.classList.remove('hidden');
+            }
+
+            // 리스트 드로우
+            photoList.innerHTML = '';
+            state.images.forEach((item, index) => {
+                const isActive = item.id === state.activeImgId;
+                const activeClass = isActive ? 'border-amber-400 bg-amber-50/70 shadow' : 'border-slate-200 bg-slate-50';
+                const isBase = index === 0;
+
+                const li = document.createElement('div');
+                li.className = `flex items-center justify-between p-2.5 rounded-lg border-2 ${activeClass} transition cursor-pointer`;
+                li.onclick = () => selectActiveImage(item.id);
+
+                li.innerHTML = `
+                    <div class="flex items-center gap-3 overflow-hidden">
+                        <span class="w-5 h-5 flex items-center justify-center rounded-full text-xs font-bold ${isBase ? 'bg-blue-600 text-white' : 'bg-slate-300 text-slate-700'}">
+                            ${index + 1}
+                        </span>
+                        <img src="${item.fileUrl}" class="w-12 h-9 object-cover rounded border border-slate-300 bg-white">
+                        <div class="truncate max-w-[150px] sm:max-w-[200px]">
+                            <p class="text-xs font-semibold text-slate-700 truncate">${item.name}</p>
+                            <p class="text-[10px] text-slate-400">${isBase ? '기준 배경 자전거' : '비교 대상 자전거'}</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-1.5" onclick="event.stopPropagation()">
+                        <button onclick="moveImageIndex('${item.id}', -1)" class="p-1 hover:bg-slate-200 rounded text-slate-400" title="위로">
+                            <i data-lucide="chevron-up" class="w-3.5 h-3.5"></i>
+                        </button>
+                        <button onclick="moveImageIndex('${item.id}', 1)" class="p-1 hover:bg-slate-200 rounded text-slate-400" title="아래로">
+                            <i data-lucide="chevron-down" class="w-3.5 h-3.5"></i>
+                        </button>
+                        <button onclick="removeImage('${item.id}')" class="p-1 hover:bg-red-100 rounded text-red-500" title="삭제">
+                            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                        </button>
+                    </div>
+                `;
+                photoList.appendChild(li);
+            });
+
+            // 제어 컴포넌트 잠금 해제 체크
+            checkReadyState();
+            lucide.createIcons();
+        }
+
+        // 제어 자격 검사 및 버튼 활성화 제어
+        function checkReadyState() {
+            const minImages = state.images.length >= 2;
+            playBtn.disabled = !minImages;
+            stepBtn.disabled = !minImages;
+            downloadAnimBtn.disabled = state.images.length === 0;
+            aiAlignBtn.disabled = !(minImages && state.opencvLoaded);
+        }
+
+        // 특정 자전거 활성 선택 (수동 조정을 위함)
+        function selectActiveImage(id) {
+            state.activeImgId = id;
+            updateUI();
+
+            const image = state.images.find(img => img.id === id);
+            if (image) {
+                manualPanel.classList.remove('opacity-50', 'pointer-events-none');
+                manualScale.value = image.scale;
+                manualX.value = image.x;
+                manualY.value = image.y;
+                manualRotate.value = image.rotate;
+
+                scaleVal.textContent = image.scale.toFixed(2);
+                xVal.textContent = image.x + 'px';
+                yVal.textContent = image.y + 'px';
+                rotateVal.textContent = image.rotate.toFixed(1) + '°';
+
+                // 스테이지 상에서 선택한 자전거를 반투명하게 강조
+                state.images.forEach(img => {
+                    const el = document.getElementById('stage_img_' + img.id);
+                    if (el) {
+                        if (img.id === id) {
+                            el.style.opacity = 0.65; // 조절 중인 것은 아래 자전거가 투영되도록 설정
+                        } else if (state.images[0].id === img.id) {
+                            el.style.opacity = 1.0;  // 1번 자전거는 항상 보이게
+                        } else {
+                            el.style.opacity = 0.0;
+                        }
+                    }
+                });
+                drawCircles();
+            } else {
+                manualPanel.classList.add('opacity-50', 'pointer-events-none');
+            }
+        }
+
+        // 이미지 정렬 순서 조정
+        window.moveImageIndex = function(id, dir) {
+            const idx = state.images.findIndex(img => img.id === id);
+            if (idx === -1) return;
+            
+            const newIdx = idx + dir;
+            if (newIdx < 0 || newIdx >= state.images.length) return;
+
+            // 스왑
+            const temp = state.images[idx];
+            state.images[idx] = state.images[newIdx];
+            state.images[newIdx] = temp;
+
+            // 순서가 변하면 투명도 재정의
+            state.images.forEach((img, i) => {
+                img.opacity = i === 0 ? 1.0 : 0.0;
+            });
+
+            updateUI();
+            renderStage();
+        };
+
+        // 이미지 삭제
+        window.removeImage = function(id) {
+            state.images = state.images.filter(img => img.id !== id);
+            if (state.activeImgId === id) {
+                state.activeImgId = null;
+                manualPanel.classList.add('opacity-50', 'pointer-events-none');
+            }
+            // 첫 이미지 투명도 100% 갱신
+            if (state.images.length > 0) {
+                state.images.forEach((img, i) => {
+                    img.opacity = i === 0 ? 1.0 : 0.0;
+                });
+            }
+            updateUI();
+            renderStage();
+        };
+
+        // 전체 삭제
+        clearAllBtn.addEventListener('click', () => {
+            if (confirm("정말 모든 자전거 사진을 지우시겠습니까?")) {
+                stopLoop();
+                state.images = [];
+                state.activeImgId = null;
+                manualPanel.classList.add('opacity-50', 'pointer-events-none');
+                updateUI();
+                renderStage();
+            }
+        });
+
+        // 캔버스 스테이지 렌더링
+        function renderStage() {
+            imageStage.innerHTML = '';
+            if (state.images.length === 0) return;
+
+            state.images.forEach((item) => {
+                const img = document.createElement('img');
+                img.id = 'stage_img_' + item.id;
+                img.src = item.fileUrl;
+                img.className = 'absolute top-0 left-0 w-full h-full object-contain pointer-events-none transition-opacity duration-200';
+                img.style.opacity = item.opacity;
+                img.style.transformOrigin = 'center center';
+                
+                // 트랜스폼 데이터 부여
+                img.style.transform = `translate(${item.x}px, ${item.y}px) scale(${item.scale}) rotate(${item.rotate}deg)`;
+                imageStage.appendChild(img);
+            });
+
+            // 가이드라인 캔버스 사이즈 매칭
+            resizeCanvas();
+            drawCircles();
+        }
+
+        // 수동 미세 정렬 슬라이더 이벤트 바인딩
+        function bindManualEvents() {
+            manualScale.addEventListener('input', (e) => {
+                const val = parseFloat(e.target.value);
+                scaleVal.textContent = val.toFixed(2);
+                updateSelectedTransform('scale', val);
+            });
+            manualX.addEventListener('input', (e) => {
+                const val = parseInt(e.target.value);
+                xVal.textContent = val + 'px';
+                updateSelectedTransform('x', val);
+            });
+            manualY.addEventListener('input', (e) => {
+                const val = parseInt(e.target.value);
+                yVal.textContent = val + 'px';
+                updateSelectedTransform('y', val);
+            });
+            manualRotate.addEventListener('input', (e) => {
+                const val = parseFloat(e.target.value);
+                rotateVal.textContent = val.toFixed(1) + '°';
+                updateSelectedTransform('rotate', val);
+            });
+        }
+        bindManualEvents();
+
+        function updateSelectedTransform(property, val) {
+            const activeImg = state.images.find(img => img.id === state.activeImgId);
+            if (activeImg) {
+                activeImg[property] = val;
+                const el = document.getElementById('stage_img_' + activeImg.id);
+                if (el) {
+                    el.style.transform = `translate(${activeImg.x}px, ${activeImg.y}px) scale(${activeImg.scale}) rotate(${activeImg.rotate}deg)`;
+                }
+                drawCircles();
+            }
+        }
+
+        // 캔버스 리사이즈
+        function resizeCanvas() {
+            guideCanvas.width = viewerViewport.clientWidth;
+            guideCanvas.height = viewerViewport.clientHeight;
+        }
+        window.addEventListener('resize', () => {
+            resizeCanvas();
+            drawCircles();
+        });
+
+        // 원 가이드라인 그리기
+        function drawCircles() {
+            const ctx = guideCanvas.getContext('2d');
+            ctx.clearRect(0, 0, guideCanvas.width, guideCanvas.height);
+            
+            if (!showCirclesToggle.checked) return;
+
+            // 수동으로 선택된 자전거 이미지의 검출된 원 그리기
+            const target = state.images.find(img => img.id === state.activeImgId) || state.images[0];
+            if (!target || !target.detectedCircles || target.detectedCircles.length === 0) return;
+
+            const scaleX = guideCanvas.width / target.imgElement.naturalWidth;
+            const scaleY = guideCanvas.height / target.imgElement.naturalHeight;
+            // 캔버스 object-contain 비율 맞추기
+            const scaleFactor = Math.min(scaleX, scaleY);
+            const offsetX = (guideCanvas.width - target.imgElement.naturalWidth * scaleFactor) / 2;
+            const offsetY = (guideCanvas.height - target.imgElement.naturalHeight * scaleFactor) / 2;
+
+            target.detectedCircles.forEach((circle, idx) => {
+                // 수동 파라미터 적용 계산
+                const rad = circle.r * scaleFactor * target.scale;
+                
+                // 회전 중심 매칭 계산
+                const imgCenterX = guideCanvas.width / 2;
+                const imgCenterY = guideCanvas.height / 2;
+
+                // 원본 좌표의 스케일링된 상대 좌표
+                let cx = (circle.x * scaleFactor) + offsetX;
+                let cy = (circle.y * scaleFactor) + offsetY;
+
+                // 스케일 변화 반영
+                cx = imgCenterX + (cx - imgCenterX) * target.scale;
+                cy = imgCenterY + (cy - imgCenterY) * target.scale;
+
+                // 회전각 적용
+                const theta = (target.rotate * Math.PI) / 180;
+                const rx = imgCenterX + (cx - imgCenterX) * Math.cos(theta) - (cy - imgCenterY) * Math.sin(theta);
+                const ry = imgCenterY + (cx - imgCenterX) * Math.sin(theta) + (cy - imgCenterY) * Math.cos(theta);
+
+                // 평행이동 적용
+                const finalX = rx + target.x;
+                const finalY = ry + target.y;
+
+                // 앞바퀴, 뒷바퀴 가이드라인 표시
+                ctx.beginPath();
+                ctx.arc(finalX, finalY, rad, 0, 2 * Math.PI);
+                ctx.lineWidth = 3;
+                ctx.strokeStyle = idx === 0 ? '#ff3838' : '#38ff38'; // 원 1: 빨간색, 원 2: 연두색
+                ctx.stroke();
+
+                // 십자 중앙점 표시
+                ctx.beginPath();
+                ctx.moveTo(finalX - 10, finalY);
+                ctx.lineTo(finalX + 10, finalY);
+                ctx.moveTo(finalX, finalY - 10);
+                ctx.lineTo(finalX, finalY + 10);
+                ctx.lineWidth = 1.5;
+                ctx.strokeStyle = '#ffffff';
+                ctx.stroke();
+            });
+        }
+
+        showCirclesToggle.addEventListener('change', drawCircles);
+
+
+        // ==========================================
+        //  AI 자전거 바퀴 인식 및 자동 정렬 로직 (Hough Circle)
+        // ==========================================
+        
+        aiAlignBtn.addEventListener('click', async () => {
+            if (state.images.length < 2) return;
+            
+            showLoading("자전거 바퀴 감지 중...", "AI 컴퓨터 비전 엔진이 바퀴 위치를 추적하고 있습니다.");
+            stopLoop();
+
+            // 순차적으로 이미지 분석 실행
+            setTimeout(() => {
+                try {
+                    for (let i = 0; i < state.images.length; i++) {
+                        detectWheelsForImage(state.images[i]);
+                    }
+
+                    // 1번 사진을 기준으로 나머지 정렬 실행
+                    alignImagesWithBase();
+                    
+                    hideLoading();
+                    alert("AI 바퀴 자동 정렬이 완료되었습니다!");
+                    
+                    // 정렬이 완료되면 레이어 오버레이를 끈 채 애니메이션 바로 비교할 수 있도록 세팅
+                    if (state.images.length >= 2) {
+                        selectActiveImage(state.images[0].id);
+                    }
+                    renderStage();
+                } catch (error) {
+                    console.error(error);
+                    hideLoading();
+                    alert("바퀴 정렬 중 오류가 발생했습니다. 수동 정렬을 이용해주세요.");
+                }
+            }, 100);
+        });
+
+        // 이미지 하나에서 두 바퀴(가장 뚜렷한 원형 2개) 찾기
+        function detectWheelsForImage(imgObj) {
+            const img = imgObj.imgElement;
+            const src = cv.imread(img);
+            const gray = new cv.Mat();
+            cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
+
+            // 허프 원 변환(HoughCircles)을 이용해 타겟 서클 추출
+            // 자전거 바퀴 크기는 보통 이미지 높이의 10%~30% 범위
+            const minRadius = Math.round(img.naturalHeight * 0.08);
+            const maxRadius = Math.round(img.naturalHeight * 0.40);
+            
+            const circles = new cv.Mat();
+            cv.HoughCircles(
+                gray, 
+                circles, 
+                cv.HOUGH_GRADIENT, 
+                1,              // 해상도 비율
+                minRadius * 1.5, // 원 검출 간 최소 거리 (앞바퀴, 뒷바퀴 간 거리 보장)
+                100,            // Canny edge 윗 임계값
+                40,             // 원 허용 누적 임계값 (원인으로 확정 짓는 스코어 한계점)
+                minRadius, 
+                maxRadius
+            );
+
+            let detected = [];
+            // 검출된 원 추출
+            if (circles.cols > 0) {
+                for (let i = 0; i < Math.min(circles.cols, 4); ++i) {
+                    const x = circles.data32F[i * 3];
+                    const y = circles.data32F[i * 3 + 1];
+                    const r = circles.data32F[i * 3 + 2];
+                    detected.push({ x, y, r });
+                }
+            }
+
+            // 자전거에는 대표적으로 앞바퀴와 뒷바퀴 2개의 큰 원이 발견됩니다. 
+            // 검출된 원이 없는 경우 수동 임계 검출(크기가 가장 큰 순으로 정렬 후 상위 2개 추출)
+            detected.sort((a, b) => b.r - a.r);
+            imgObj.detectedCircles = detected.slice(0, 2);
+
+            // X 좌표가 작은 것을 뒷바퀴(왼쪽), 큰 것을 앞바퀴(오른쪽)로 규정 (보통의 자전거 사진 형태)
+            imgObj.detectedCircles.sort((a, b) => a.x - b.x);
+
+            // 메모리 해제
+            src.delete();
+            gray.delete();
+            circles.delete();
+        }
+
+        // 1번 사진을 기준으로 다른 사진 정렬 행렬 계산
+        function alignImagesWithBase() {
+            const base = state.images[0];
+            if (!base.detectedCircles || base.detectedCircles.length < 2) {
+                // 기준 이미지에서 원을 검출 실패했을 때 임의의 임시 바퀴축 생성
+                base.detectedCircles = [
+                    { x: base.imgElement.naturalWidth * 0.25, y: base.imgElement.naturalHeight * 0.6, r: base.imgElement.naturalHeight * 0.2 },
+                    { x: base.imgElement.naturalWidth * 0.75, y: base.imgElement.naturalHeight * 0.6, r: base.imgElement.naturalHeight * 0.2 }
+                ];
+            }
+
+            const baseWheel1 = base.detectedCircles[0]; // 뒷바퀴
+            const baseWheel2 = base.detectedCircles[1]; // 앞바퀴
+
+            // 기준 자전거의 앞뒤 바퀴간 중심 거리 및 각도 계산
+            const baseDx = baseWheel2.x - baseWheel1.x;
+            const baseDy = baseWheel2.y - baseWheel1.y;
+            const baseDist = Math.sqrt(baseDx*baseDx + baseDy*baseDy);
+            const baseAngle = Math.atan2(baseDy, baseDx);
+            const baseMidX = (baseWheel1.x + baseWheel2.x) / 2;
+            const baseMidY = (baseWheel1.y + baseWheel2.y) / 2;
+
+            const stageW = viewerViewport.clientWidth;
+            const stageH = viewerViewport.clientHeight;
+
+            // 각 이미지의 스케일, X, Y, 각도 매칭
+            for (let i = 1; i < state.images.length; i++) {
+                const target = state.images[i];
+                if (!target.detectedCircles || target.detectedCircles.length < 2) {
+                    // 원형 감지 실패 대비 임시 디폴트 원 위치 생성
+                    target.detectedCircles = [
+                        { x: target.imgElement.naturalWidth * 0.25, y: target.imgElement.naturalHeight * 0.6, r: target.imgElement.naturalHeight * 0.2 },
+                        { x: target.imgElement.naturalWidth * 0.75, y: target.imgElement.naturalHeight * 0.6, r: target.imgElement.naturalHeight * 0.2 }
+                    ];
+                }
+
+                const tWheel1 = target.detectedCircles[0];
+                const tWheel2 = target.detectedCircles[1];
+
+                const tDx = tWheel2.x - tWheel1.x;
+                const tDy = tWheel2.y - tWheel1.y;
+                const tDist = Math.sqrt(tDx*tDx + tDy*tDy);
+                const tAngle = Math.atan2(tDy, tDx);
+                const tMidX = (tWheel1.x + tWheel2.x) / 2;
+                const tMidY = (tWheel1.y + tWheel2.y) / 2;
+
+                // 1. 크기 비율 맞춤 (스케일)
+                // 각 사진 이미지 해상도 비율과 휠 간 거리비를 복합 정비례 계산
+                const intrinsicRatio = (base.imgElement.naturalWidth / target.imgElement.naturalWidth);
+                const wheelDistanceRatio = baseDist / tDist;
+                target.scale = wheelDistanceRatio * intrinsicRatio;
+
+                // 2. 바퀴 수평각도 정렬 (회전각 계산)
+                const angleDiff = baseAngle - tAngle;
+                target.rotate = (angleDiff * 180) / Math.PI;
+
+                // 3. 중심 이동 편차 계산 (바퀴 간의 정중앙점을 원점 삼아 평행이동)
+                // 이미지 Stage가 감싼 contain 해상도 비례 적용
+                const scaleFactorBase = Math.min(stageW / base.imgElement.naturalWidth, stageH / base.imgElement.naturalHeight);
+                const scaleFactorTarget = Math.min(stageW / target.imgElement.naturalWidth, stageH / target.imgElement.naturalHeight);
+
+                const baseCenterOnStageX = baseMidX * scaleFactorBase;
+                const baseCenterOnStageY = baseMidY * scaleFactorBase;
+                const targetCenterOnStageX = tMidX * scaleFactorTarget * target.scale;
+                const targetCenterOnStageY = tMidY * scaleFactorTarget * target.scale;
+
+                target.x = baseCenterOnStageX - targetCenterOnStageX;
+                target.y = baseCenterOnStageY - targetCenterOnStageY;
+            }
+        }
+
+
+        // ==========================================
+        //  애니메이션 플레이 제어 루프
+        // ==========================================
+
+        playBtn.addEventListener('click', () => {
+            if (state.isAnimating) {
+                stopLoop();
+            } else {
+                startLoop();
+            }
+        });
+
+        stepBtn.addEventListener('click', () => {
+            if (state.isAnimating) stopLoop();
+            nextFrame();
+        });
+
+        downloadAnimBtn.addEventListener('click', () => {
+            downloadAnimation();
+        });
+
+        animSpeed.addEventListener('input', (e) => {
+            const val = parseFloat(e.target.value);
+            speedValText.textContent = val.toFixed(2) + 's';
+            if (state.isAnimating) {
+                stopLoop();
+                startLoop();
+            }
+        });
+
+        function startLoop() {
+            if (state.images.length < 2) return;
+            state.isAnimating = true;
+            playBtn.innerHTML = `<i data-lucide="square" class="w-4 h-4 fill-current"></i>애니메이션 정지`;
+            playBtn.className = "bg-rose-600 text-white font-bold py-2 px-6 rounded-lg hover:bg-rose-500 transition flex items-center gap-2 shadow-md shadow-rose-950/30";
+            
+            // 미세 조작 패널 중단
+            manualPanel.classList.add('opacity-50', 'pointer-events-none');
+
+            const ms = parseFloat(animSpeed.value) * 1000;
+            state.animationTimer = setInterval(nextFrame, ms);
+            lucide.createIcons();
+        }
+
+        function stopLoop() {
+            state.isAnimating = false;
+            clearInterval(state.animationTimer);
+            playBtn.innerHTML = `<i data-lucide="play" class="w-4 h-4 fill-current"></i>애니메이션 재생`;
+            playBtn.className = "bg-emerald-600 text-white font-bold py-2 px-6 rounded-lg hover:bg-emerald-500 transition flex items-center gap-2 shadow-md shadow-emerald-900/30";
+            currentFrameBadge.textContent = "대기 중";
+            currentFrameBadge.className = "bg-blue-900/50 border border-blue-700/50 text-blue-400 px-2.5 py-1 rounded-full font-bold";
+            
+            // 수동 편집이 선택되어 있었으면 복원
+            if (state.activeImgId) {
+                selectActiveImage(state.activeImgId);
+            } else {
+                // 애니메이션이 끝나면 리스트 순서에 맞춘 원본 디폴트 반환 (1번 보여주기)
+                state.images.forEach((img, index) => {
+                    img.opacity = index === 0 ? 1.0 : 0.0;
+                    const el = document.getElementById('stage_img_' + img.id);
+                    if (el) el.style.opacity = img.opacity;
+                });
+            }
+            lucide.createIcons();
+        }
+
+        function nextFrame() {
+            const len = state.images.length;
+            if (len === 0) return;
+
+            // 인덱스 회전
+            state.currentFrameIdx = (state.currentFrameIdx + 1) % len;
+            currentFrameBadge.textContent = `${state.currentFrameIdx + 1}번째 자전거`;
+            currentFrameBadge.className = "bg-indigo-900/50 border border-indigo-700/50 text-indigo-400 px-2.5 py-1 rounded-full font-bold";
+
+            // 해당 인덱스의 이미지만 활성화하고 나머지는 숨김 처리
+            state.images.forEach((img, index) => {
+                const targetOpacity = index === state.currentFrameIdx ? 1.0 : 0.0;
+                img.opacity = targetOpacity;
+                const el = document.getElementById('stage_img_' + img.id);
+                if (el) el.style.opacity = targetOpacity;
+            });
+        }
+
+        function drawImageToCanvas(ctx, imgObj, width, height) {
+            const img = imgObj.imgElement;
+            const scaleX = width / img.naturalWidth;
+            const scaleY = height / img.naturalHeight;
+            const scaleFactor = Math.min(scaleX, scaleY);
+            const drawW = img.naturalWidth * scaleFactor;
+            const drawH = img.naturalHeight * scaleFactor;
+            const offsetX = (width - drawW) / 2;
+            const offsetY = (height - drawH) / 2;
+
+            ctx.save();
+            ctx.translate(width / 2 + imgObj.x, height / 2 + imgObj.y);
+            ctx.scale(imgObj.scale, imgObj.scale);
+            ctx.rotate((imgObj.rotate * Math.PI) / 180);
+            ctx.translate(-width / 2, -height / 2);
+            ctx.drawImage(img, offsetX, offsetY, drawW, drawH);
+            ctx.restore();
+        }
+
+        async function downloadAnimation() {
+            if (state.images.length === 0) return;
+            if (typeof GIF === 'undefined') {
+                alert('애니메이션 다운로드를 위한 라이브러리를 불러오지 못했습니다.');
+                return;
+            }
+
+            stopLoop();
+            showLoading('애니메이션 생성 중...', '프레임을 합쳐 GIF 파일로 저장합니다.');
+
+            try {
+                const width = viewerViewport.clientWidth || 1280;
+                const height = viewerViewport.clientHeight || 720;
+                const delay = Math.max(100, Math.round(parseFloat(animSpeed.value) * 1000));
+                const canvas = document.createElement('canvas');
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+
+                const gif = new GIF({
+                    workers: 2,
+                    quality: 10,
+                    width,
+                    height,
+                    workerScript: 'https://cdn.jsdelivr.net/npm/gif.js.optimized/dist/gif.worker.js'
+                });
+
+                state.images.forEach((imgObj) => {
+                    ctx.fillStyle = '#020617';
+                    ctx.fillRect(0, 0, width, height);
+                    drawImageToCanvas(ctx, imgObj, width, height);
+                    gif.addFrame(canvas, { copy: true, delay });
+                });
+
+                gif.on('finished', (blob) => {
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'bike-animation.gif';
+                    a.click();
+                    URL.revokeObjectURL(url);
+                    hideLoading();
+                    alert('애니메이션 GIF가 다운로드되었습니다.');
+                });
+
+                gif.render();
+            } catch (error) {
+                console.error(error);
+                hideLoading();
+                alert('애니메이션 다운로드 중 오류가 발생했습니다.');
+            }
+        }
+
+        // Loading helper
+        function showLoading(msg, detail) {
+            loadingMsg.textContent = msg;
+            loadingOverlay.classList.remove('hidden');
+        }
+
+        function hideLoading() {
+            loadingOverlay.classList.add('hidden');
+        }
+
+    </script>
+</body>
+</html>
